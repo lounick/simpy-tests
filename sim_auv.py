@@ -3,6 +3,10 @@ __author__ = 'nick'
 import simpy
 import math
 import angles
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import matplotlib.animation as anime
+import numpy as np
 
 DEBUG = False
 
@@ -16,7 +20,7 @@ class Auv:
     navigate_to_target = 1
     inspect_target = 2
 
-    linear_vel = 0.4  # In meters per second
+    linear_vel = 0.8  # In meters per second
     rot_vel = 0.3  # In rad per second
     inspection_duration = 120  # Inspection duration in seconds.
 
@@ -25,17 +29,21 @@ class Auv:
     env = 0
     name = ""
     target_list = 0
+    expected_timeout = 0
+    action_start = 0
 
     curr_pos = [0, 0, 0]  # All positions are NED
     curr_yaw = 0
     next_target_pos = [0, 0, 0]
+    curr_lin_vel = 0
+    curr_rot_vel = 0
 
     def __init__(self, env, name, targets):
         self.env = env
         self.name = name
         self.target_list = targets
         if DEBUG:
-            print("Initialised vehicle {0} with targets {1}".format(name,targets))
+            print("Initialised vehicle {0} with targets {1}".format(name, targets))
         self.action = env.process(self.run())
 
     def run(self):
@@ -65,7 +73,8 @@ class Auv:
                 self.next_state = self.inspect_target
             elif self.curr_state == self.inspect_target:
                 # Inspection is simulated as waiting at the spot for the moment. Will create an action later
-                print("Vehicle {0} starting inspection at point {1} at time {2}".format(self.name, self.curr_pos, self.env.now))
+                print("Vehicle {0} starting inspection at point {1} at time {2}".format(self.name, self.curr_pos,
+                                                                                        self.env.now))
                 yield self.env.timeout(self.inspection_duration)
                 print("Vehicle {0} finished inspection at {1}. Found a mine!".format(self.name, self.env.now))
                 self.next_state = self.idle
@@ -76,7 +85,7 @@ class Auv:
 
     def send_pilot_req(self, pos):
         # Calculate how much you have to rotate and how much you have to travel
-        turn = math.atan2(pos[0] - self.curr_pos[0],pos[1] - self.curr_pos[1])
+        turn = math.atan2(pos[0] - self.curr_pos[0], pos[1] - self.curr_pos[1])
         turn_deg = angles.r2d(turn)
         yaw_deg = angles.r2d(self.curr_yaw)
         norm_yaw = angles.normalize(-(yaw_deg - 90), -180, 180)
@@ -84,7 +93,7 @@ class Auv:
         turn = angles.d2r(turn)
         yield self.env.process(self.rotate(turn))
         self.curr_yaw += turn
-        self.curr_yaw = angles.d2r(angles.normalize(angles.r2d(self.curr_yaw),-180,180))
+        self.curr_yaw = angles.d2r(angles.normalize(angles.r2d(self.curr_yaw), -180, 180))
         if DEBUG:
             print("Vehicle {0} yaw: {1}".format(self.name, self.curr_yaw))
         dist = get_euclidean3d(pos, self.curr_pos)
@@ -95,21 +104,69 @@ class Auv:
 
     def move(self, distance):
         time = distance // self.linear_vel
+        self.curr_lin_vel = self.linear_vel
+        self.action_start = self.env.now
+        self.expected_timeout = self.env.now + time
         if DEBUG:
             print("Move time: ", time)
         yield self.env.timeout(time)
+        self.curr_lin_vel = 0
 
     def rotate(self, angle):
         time = abs(angle) // self.rot_vel
+        self.curr_rot_vel = self.rot_vel
+        self.action_start = self.env.now
+        self.expected_timeout = self.env.now + time
         if DEBUG:
             print("Rotate time: ", time)
         yield self.env.timeout(time)
+        self.curr_rot_vel = 0
+
+    def get_position(self):
+        if self.curr_lin_vel > 0:
+            # Vehicle is currently moving so must extrapolate
+            travel_time = self.env.now - self.action_start
+            dist = self.curr_lin_vel * travel_time
+            ndiff = math.cos(self.curr_yaw) * dist
+            ediff = math.sin(self.curr_yaw) * dist
+            ddiff = (self.next_target_pos[2] - self.curr_pos[2]) * (
+            travel_time / (self.expected_timeout - self.action_start))
+            return [self.curr_pos[0] + ndiff, self.curr_pos[1] + ediff, self.curr_pos[2] + ddiff]
+        else:
+            return self.curr_pos
 
 
-env = simpy.Environment()
-targets = [[1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 0], [-1, 0, 0], [-1, -1, 0], [0, -1, 0], [0, 0, 0]]
-targets2 = [[2, 0, 0], [2, 2, 0], [0, 2, 0], [0, 0, 0]]
-auv1 = Auv(env, "auv1", targets)
-auv2 = Auv(env, "auv2", targets2)
-env.run(until=3600)
+def position_printer(env, veh, plt):
+    plt.axis([-120, 120, -120, 120])
+    plt.hold(True)
+    first_time = True
+    prev_pos = 0
+    while True:
+        if first_time:
+            plt.plot(veh.get_position()[1], veh.get_position()[0], 'bo')
+            plt.draw()
+            first_time = False
+            prev_pos = veh.get_position()
+        else:
+            if not prev_pos == veh.get_position():
+                plt.plot(veh.get_position()[1], veh.get_position()[0], 'bo')
+                plt.draw()
+                prev_pos = veh.get_position()
 
+        yield env.timeout(10)
+
+
+if __name__ == "__main__":
+    env = simpy.Environment()
+    targets = np.array([[1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 0], [-1, 0, 0], [-1, -1, 0], [0, -1, 0], [0, 0, 0]])
+    targets = targets*100
+    targets = targets.tolist()
+    print(targets)
+    targets2 = [[2, 0, 0], [2, 2, 0], [0, 2, 0], [0, 0, 0]]
+    auv1 = Auv(env, "auv1", targets)
+    # auv2 = Auv(env, "auv2", targets2)
+    fig = plt.figure()
+    ax = plt.axes(xlim=(-2, 2), ylim=(-2, 2))
+    env.process(position_printer(env, auv1, plt))
+    env.run(until=3600)
+    plt.show()
