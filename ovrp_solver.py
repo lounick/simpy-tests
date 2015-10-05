@@ -3,9 +3,6 @@ __author__ = 'nick'
 
 # Simple path optimiser that accepts an entry and exit point in literature it is defined as Open Vehicle Routing Problem
 
-import sys
-import math
-import random
 import numpy as np
 from gurobipy import *
 
@@ -13,20 +10,33 @@ HAS_GUROBI = True
 
 # Euclidean distance between two points
 
+
 def distance(points, i, j):
     return np.linalg.norm(points[i, :] - points[j, :])
 
 
 def ovrp_solver(cities, start=None, finish=None):
 
+    """
+    Open vehicle routing problem solver for a single vehicle using the Gurobi MILP optimiser.
+    :param cities: List of points to optimise the route. Numpy NxM array, where M is in [2, 3] (dimension of the points)
+    :param start: Optional starting point for the tour. If none is provided the first point of the array is chosen
+    :param finish: Optional ending point of the tour. If none is provided the last point of the array is chosen
+    :return: Returns the route the cost and the model.
+    """
+
+    # Check for default values
     if start is None:
         start = 0
     if finish is None:
         finish = len(cities)-1
+
+    # Number of points
     n = len(cities)
+
     m = Model()
 
-    # Create variables
+    # Create model variables
     vars = {}
     for i in range(n):
         for j in range(n):
@@ -64,6 +74,7 @@ def ovrp_solver(cities, start=None, finish=None):
             m.addConstr(quicksum(vars[j,i] for j in range(n)) == 1)
     m.update()
 
+    # Sub-tour elimination constraint
     for i in range(n):
         for j in range(n):
             if (i != j):
@@ -162,7 +173,6 @@ def main():
 
         fig, ax = __plot_problem(points, tsp_route, total_cost)
         plt.show()
-
 
 
 if __name__ == '__main__':
