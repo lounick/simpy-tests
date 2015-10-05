@@ -107,7 +107,7 @@ class Auv:
             print("Vehicle {0} position: {1}".format(self.name, self.curr_pos))
 
     def move(self, distance):
-        time = distance // self.linear_vel
+        time = distance / self.linear_vel
         self.curr_lin_vel = self.linear_vel
         self.action_start = self.env.now
         self.expected_timeout = self.env.now + time
@@ -117,7 +117,7 @@ class Auv:
         self.curr_lin_vel = 0
 
     def rotate(self, angle):
-        time = abs(angle) // self.rot_vel
+        time = abs(angle) / self.rot_vel
         self.curr_rot_vel = self.rot_vel
         self.action_start = self.env.now
         self.expected_timeout = self.env.now + time
@@ -134,7 +134,7 @@ class Auv:
             ndiff = math.cos(self.curr_yaw) * dist
             ediff = math.sin(self.curr_yaw) * dist
             ddiff = (self.next_target_pos[2] - self.curr_pos[2]) * (
-            travel_time / (self.expected_timeout - self.action_start))
+                travel_time / (self.expected_timeout - self.action_start))
             return [self.curr_pos[0] + ndiff, self.curr_pos[1] + ediff, self.curr_pos[2] + ddiff]
         else:
             return self.curr_pos
