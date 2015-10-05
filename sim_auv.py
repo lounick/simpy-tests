@@ -7,23 +7,27 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.animation as anime
 import numpy as np
+import time
+import gurobipy
 
 DEBUG = False
-
+PLOT = False
 
 def get_euclidean3d(p1, p2):
     return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2 + (p1[2] - p2[2]) ** 2)
 
-
 class Auv:
+    # States
     idle = 0
     navigate_to_target = 1
     inspect_target = 2
 
+    # Vehicle constants
     linear_vel = 0.8  # In meters per second
     rot_vel = 0.3  # In rad per second
     inspection_duration = 120  # Inspection duration in seconds.
 
+    # Control variables
     curr_state = 0
     next_state = 0
     env = 0
@@ -157,6 +161,7 @@ def position_printer(env, veh, plt):
 
 
 if __name__ == "__main__":
+    start = time.time()
     env = simpy.Environment()
     targets = np.array([[1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 0], [-1, 0, 0], [-1, -1, 0], [0, -1, 0], [0, 0, 0]])
     targets = targets*100
@@ -165,8 +170,9 @@ if __name__ == "__main__":
     targets2 = [[2, 0, 0], [2, 2, 0], [0, 2, 0], [0, 0, 0]]
     auv1 = Auv(env, "auv1", targets)
     # auv2 = Auv(env, "auv2", targets2)
-    fig = plt.figure()
-    ax = plt.axes(xlim=(-2, 2), ylim=(-2, 2))
-    env.process(position_printer(env, auv1, plt))
+    if PLOT:
+        env.process(position_printer(env, auv1, plt))
     env.run(until=3600)
-    plt.show()
+    print(time.time()-start)
+    if PLOT:
+        plt.show()
