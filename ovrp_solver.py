@@ -113,6 +113,7 @@ def main():
     import time
     import matplotlib as mpl
     import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
 
     mpl.style.use('bmh')
     mpl.rcParams['figure.figsize'] = (12, 6)
@@ -146,9 +147,17 @@ def main():
 
         return fig, ax
 
+    def __plot_problem3d(ips, tsp_route, total_cost):
+        idx = tsp_route
+        ips_route = ips[idx, :]
+        fig, ax = plt.subplots()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.scatter(ips[:, 1], ips[:, 0], ips[:,2], 'o', label='inspection points')
+        ax.plot(ips_route[:, 1], ips_route[:, 0], ips_route[:, 2], 'r-', alpha=0.3)
+
     # generate random problem
     n = 20
-    points = np.random.randint(-50, 50, (n, 2))
+    points = np.random.randint(-50, 50, (n, 3))
     cities = ['c_{}'.format(k) for k in xrange(n)]
 
     # standard cost
@@ -172,6 +181,10 @@ def main():
 
 
         fig, ax = __plot_problem(points, tsp_route, total_cost)
+
+        if points.shape[1] == 3:
+            __plot_problem3d(points, tsp_route, total_cost)
+
         plt.show()
 
 
