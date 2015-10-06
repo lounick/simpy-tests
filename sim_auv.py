@@ -35,6 +35,8 @@ class Auv:
     target_list = 0
     expected_timeout = 0
     action_start = 0
+    plan_request = 0
+    plan_feedback = 0
 
     curr_pos = [0, 0, 0]  # All positions are NED
     curr_yaw = 0
@@ -42,10 +44,11 @@ class Auv:
     curr_lin_vel = 0
     curr_rot_vel = 0
 
-    def __init__(self, env, name, targets):
+    def __init__(self, env, name, plan_request, plan_feedback):
         self.env = env
         self.name = name
-        self.target_list = targets
+        self.plan_request = plan_request
+        self.plan_feedback = plan_feedback
         if DEBUG:
             print("Initialised vehicle {0} with targets {1}".format(name, targets))
         self.action = env.process(self.run())
@@ -160,7 +163,7 @@ def position_printer(env, veh, plt):
         yield env.timeout(10)
 
 
-if __name__ == "__main__":
+def main():
     start = time.time()
     env = simpy.Environment()
     targets = np.array([[1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 0], [-1, 0, 0], [-1, -1, 0], [0, -1, 0], [0, 0, 0]])
@@ -176,3 +179,6 @@ if __name__ == "__main__":
     print(time.time()-start)
     if PLOT:
         plt.show()
+
+if __name__ == "__main__":
+    main()
