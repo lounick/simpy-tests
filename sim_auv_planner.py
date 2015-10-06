@@ -3,14 +3,26 @@ __author__ = 'nick'
 from sim_auv import *
 
 class AuvPlanner:
+
+    planer_timeout = 10 # Planner rate 0.1 Hz to check.
+
     env = 0
-    executor = 0
-    def __init__(self, env, auv_executor):
+    plan_request = 0
+    plan_feedback = 0
+    def __init__(self, env, plan_request, plan_feedback):
         self.env = env
-        self.executor = auv_executor
+        self.plan_request = plan_request
+        self.plan_feedback = plan_feedback
+        self.action = env.process(self.run())
 
     def run(self):
-        pass
+        while True:
+            pass
+
+
+
+def main():
+    pass
 
 if __name__ == "__main__":
-    print("running main function")
+    main()
