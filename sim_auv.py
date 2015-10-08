@@ -5,10 +5,12 @@ import math
 import angles
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import matplotlib.animation as anime
 import numpy as np
 import time
-import gurobipy
+
+from pipe import Pipe
+from msgs import *
+from target import Target
 
 DEBUG = False
 PLOT = False
@@ -32,58 +34,86 @@ class Auv:
     next_state = 0
     env = 0
     name = ""
-    target_list = 0
+    target_list = []
+    target_order = []
     expected_timeout = 0
     action_start = 0
     plan_request = 0
     plan_feedback = 0
+    nav_req = 0
+    nav_update = 0
 
     curr_pos = [0, 0, 0]  # All positions are NED
     curr_yaw = 0
     next_target_pos = [0, 0, 0]
+    curr_target = 0
     curr_lin_vel = 0
     curr_rot_vel = 0
 
-    def __init__(self, env, name, plan_request, plan_feedback):
+    plan_msg_event = 0
+    nav_msg_event = 0
+
+    def __init__(self, env, name, plan_request, plan_feedback, nav_req, nav_update):
         self.env = env
         self.name = name
         self.plan_request = plan_request
         self.plan_feedback = plan_feedback
+        self.plan_msg_event = self.plan_request.get()
+        self.plan_msg_event.callbacks.append(self.handle_plan_msg)
+        self.nav_req = nav_req
+        self.nav_msg_event = self.nav_req.get()
+        self.nav_msg_event.callbacks.append(self.handle_nav_req)
+        self.nav_update = nav_update
         if DEBUG:
-            print("Initialised vehicle {0} with targets {1}".format(name, targets))
+            print("Initialised vehicle {0}".format(name))
         self.action = env.process(self.run())
 
     def run(self):
         while True:
             # State machine
+
             self.curr_state = self.next_state
             if self.curr_state == self.idle:
                 # Do what you have to do when idle
                 has_targets = False
-                if len(self.target_list) > 0:
+                if len(self.target_order) > 0:
                     if DEBUG:
                         print("In state idle, number of targets: {0}".format(len(self.target_list)))
-                    has_targets = True
-                    self.next_target_pos = self.target_list.pop(0)
+                    while not has_targets and len(self.target_order) > 0:
+                        self.curr_target = self.target_list[self.target_order[0]]
+                        has_targets = True
+                        if self.curr_target.classification != "None":
+                            print("Target already classified, skipping")
+                            self.target_order.pop(0)
+                            has_targets = False
+
                 if has_targets:
                     if DEBUG:
-                        print("Next target is at: ", self.next_target_pos)
+                        print("Next target is at: ", self.curr_target.ned_pos)
                     self.next_state = self.navigate_to_target
                     if DEBUG:
                         print("Next state: ", self.next_state)
                 else:
                     self.next_state = self.idle
+                    if DEBUG:
+                        print("Waiting for targets")
                     yield self.env.timeout(1)
             elif self.curr_state == self.navigate_to_target:
                 # Do what you have to do when navigating to target
-                yield self.env.process(self.send_pilot_req(self.next_target_pos))
-                self.next_state = self.inspect_target
+                try:
+                    yield self.env.process(self.send_pilot_req(self.curr_target.ned_pos))
+                    self.next_state = self.inspect_target
+                except simpy.Interrupt:
+                    self.next_state = self.idle
             elif self.curr_state == self.inspect_target:
                 # Inspection is simulated as waiting at the spot for the moment. Will create an action later
                 print("Vehicle {0} starting inspection at point {1} at time {2}".format(self.name, self.curr_pos,
                                                                                         self.env.now))
                 yield self.env.timeout(self.inspection_duration)
                 print("Vehicle {0} finished inspection at {1}. Found a mine!".format(self.name, self.env.now))
+                self.curr_target.classification = "Mine"
+                self.plan_feedback.put(PlanFeedbackMsg(self.curr_target.id, self.curr_target.classification))
+                self.target_order.pop(0)
                 self.next_state = self.idle
             else:
                 # You shouldn't be here print error message and default to idle state
@@ -142,6 +172,21 @@ class Auv:
         else:
             return self.curr_pos
 
+    def handle_plan_msg(self, event):
+        self.plan_msg_event = self.plan_request.get()
+        self.plan_msg_event.callbacks.append(self.handle_plan_msg)
+        if self.curr_state == self.navigate_to_target:
+            self.curr_pos = self.get_position()
+            self.action.interrupt()
+        self.target_list = event.value.target_list
+        self.target_order = event.value.target_order
+
+    def handle_nav_req(self, event):
+        self.nav_msg_event = self.nav_req.get()
+        self.nav_msg_event.callbacks.append(self.handle_nav_req)
+        current_pos = self.get_position()
+        self.nav_update.put(NavUpdateMsg(current_pos))
+
 
 def position_printer(env, veh, plt):
     plt.axis([-120, 120, -120, 120])
@@ -163,16 +208,79 @@ def position_printer(env, veh, plt):
         yield env.timeout(10)
 
 
-def main():
-    start = time.time()
-    env = simpy.Environment()
+class Target_generator:
+    # targets = np.random.uniform(-1,1,[8,3])
+    # targets[:, 2] = np.random.rand(targets.shape[0])
     targets = np.array([[1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 0], [-1, 0, 0], [-1, -1, 0], [0, -1, 0], [0, 0, 0]])
     targets = targets*100
     targets = targets.tolist()
-    print(targets)
-    targets2 = [[2, 0, 0], [2, 2, 0], [0, 2, 0], [0, 0, 0]]
-    auv1 = Auv(env, "auv1", targets)
-    # auv2 = Auv(env, "auv2", targets2)
+    targets_list = []
+    uid = 0
+
+    def __init__(self, env, plan_req, plan_fb, nav_req, nav_update):
+        self.env = env
+        self.plan_req = plan_req
+        self.plan_fb = plan_fb
+        self.plan_msg_event = self.plan_fb.get()
+        self.plan_msg_event.callbacks.append(self.handle_plan_feedback)
+        self.nav_req = nav_req
+        self.nav_update = nav_update
+        self.nav_msg_event = self.nav_update.get()
+        self.nav_msg_event.callbacks.append(self.handle_nav_update)
+        if DEBUG:
+            print("Initialised")
+        self.action = env.process(self.run())
+
+    def handle_plan_feedback(self, event):
+        self.plan_msg_event = self.plan_fb.get()
+        self.plan_msg_event.callbacks.append(self.handle_plan_feedback)
+        self.targets_list[event.value.target_id][1].classification = event.value.target_class
+        print("The AUV has classified target {0} with class {1}".format(event.value.target_id, self.targets_list[event.value.target_id][1].classification))
+
+    def handle_nav_update(self, event):
+        self.nav_msg_event = self.nav_update.get()
+        self.nav_msg_event.callbacks.append(self.handle_nav_update)
+        print("The vehicle is at {0}".format(event.value.pos))
+
+    def run(self):
+        while True:
+            # self.msg_event = self.plan_fb.get()
+            # self.msg_event.callbacks.append(self.handle_plan_feedback)
+            self.nav_req.put(NavReqMsg())
+            if len(self.targets) > 0:
+                # There are more targets to generate
+                self.targets_list.append([self.uid, Target(self.uid, self.targets.pop(0))])
+                self.uid += 1
+
+
+                unclassified_targets = []
+                for i in range(len(self.targets_list)):
+                    if self.targets_list[i][1].classification == "None":
+                        unclassified_targets.append([i, self.targets_list[i][1]])
+                if len(unclassified_targets) > 0:
+                    # Should create a plan
+                    targets_order = range(len(unclassified_targets))
+                    target_list = []
+                    for i in range(len(unclassified_targets)):
+                        target_list.append(unclassified_targets[i][1])
+                    self.plan_req.put(PlanReqMsg(target_list, targets_order))
+            yield self.env.timeout(120)
+
+
+def main():
+    # Simulation setup
+    start = time.time()
+    env = simpy.Environment()
+
+    # Process cabling
+    plan_request = Pipe(env, 0)
+    plan_feedback = Pipe (env, 0)
+    nav_req = Pipe(env, 0)
+    nav_update = Pipe(env, 0)
+    # env.process(__target_generator(env, plan_request, plan_feedback))
+    tg = Target_generator(env, plan_request, plan_feedback, nav_req, nav_update)
+    auv1 = Auv(env, "auv1", plan_request, plan_feedback, nav_req, nav_update)
+
     if PLOT:
         env.process(position_printer(env, auv1, plt))
     env.run(until=3600)
