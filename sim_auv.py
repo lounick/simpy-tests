@@ -5,20 +5,26 @@ import math
 import angles
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import time
+import os
 
 from pipe import Pipe
 from msgs import *
 from target import Target
 
+# DEBUG = os.environ.get('DEBUG', None) == "True"
+# PLOT = os.environ.get('PLOT', None) == "True"
 DEBUG = False
-PLOT = False
+PLOT = True
+
 
 def get_euclidean3d(p1, p2):
     return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2 + (p1[2] - p2[2]) ** 2)
 
-class Auv:
+
+class AuvExecutor:
     # States
     idle = 0
     navigate_to_target = 1
@@ -45,7 +51,6 @@ class Auv:
 
     curr_pos = [0, 0, 0]  # All positions are NED
     curr_yaw = 0
-    next_target_pos = [0, 0, 0]
     curr_target = 0
     curr_lin_vel = 0
     curr_rot_vel = 0
@@ -128,14 +133,20 @@ class Auv:
         norm_yaw = angles.normalize(-(yaw_deg - 90), -180, 180)
         turn = angles.normalize(norm_yaw - turn_deg, -180, 180)
         turn = angles.d2r(turn)
+
         yield self.env.process(self.rotate(turn))
+
         self.curr_yaw += turn
         self.curr_yaw = angles.d2r(angles.normalize(angles.r2d(self.curr_yaw), -180, 180))
+
         if DEBUG:
             print("Vehicle {0} yaw: {1}".format(self.name, self.curr_yaw))
+
         dist = get_euclidean3d(pos, self.curr_pos)
         yield self.env.process(self.move(dist))
+
         self.curr_pos = pos
+
         if DEBUG:
             print("Vehicle {0} position: {1}".format(self.name, self.curr_pos))
 
@@ -162,13 +173,11 @@ class Auv:
     def get_position(self):
         if self.curr_lin_vel > 0:
             # Vehicle is currently moving so must extrapolate
-            travel_time = self.env.now - self.action_start
-            dist = self.curr_lin_vel * travel_time
-            ndiff = math.cos(self.curr_yaw) * dist
-            ediff = math.sin(self.curr_yaw) * dist
-            ddiff = (self.next_target_pos[2] - self.curr_pos[2]) * (
-                travel_time / (self.expected_timeout - self.action_start))
-            return [self.curr_pos[0] + ndiff, self.curr_pos[1] + ediff, self.curr_pos[2] + ddiff]
+            return [
+                np.interp(self.env.now, [self.action_start, self.expected_timeout], [self.curr_pos[0], self.curr_target.ned_pos[0]]),
+                np.interp(self.env.now, [self.action_start, self.expected_timeout], [self.curr_pos[1], self.curr_target.ned_pos[1]]),
+                np.interp(self.env.now, [self.action_start, self.expected_timeout], [self.curr_pos[2], self.curr_target.ned_pos[2]])
+            ]
         else:
             return self.curr_pos
 
@@ -188,27 +197,29 @@ class Auv:
         self.nav_update.put(NavUpdateMsg(current_pos))
 
 
-def position_printer(env, veh, plt):
-    plt.axis([-120, 120, -120, 120])
-    plt.hold(True)
+def position_printer(env, veh, ax):
+    ax.set_xlabel("East")
+    ax.set_ylabel("North")
+    ax.set_zlabel("Depth")
+    ax.hold(True)
+    ax.grid(True)
     first_time = True
     prev_pos = 0
     while True:
         if first_time:
-            plt.plot(veh.get_position()[1], veh.get_position()[0], 'bo')
-            plt.draw()
+            ax.scatter(veh.get_position()[1], veh.get_position()[0], veh.get_position()[2], 'o', label='inspection points')
             first_time = False
             prev_pos = veh.get_position()
         else:
             if not prev_pos == veh.get_position():
-                plt.plot(veh.get_position()[1], veh.get_position()[0], 'bo')
-                plt.draw()
+                ax.scatter(veh.get_position()[1], veh.get_position()[0], veh.get_position()[2], 'o', label='inspection points')
                 prev_pos = veh.get_position()
+                # print(veh.get_position())
 
         yield env.timeout(10)
 
 
-class Target_generator:
+class TargetGenerator:
     # targets = np.random.uniform(-1,1,[8,3])
     # targets[:, 2] = np.random.rand(targets.shape[0])
     targets = np.array([[1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 0], [-1, 0, 0], [-1, -1, 0], [0, -1, 0], [0, 0, 0]])
@@ -252,7 +263,6 @@ class Target_generator:
                 self.targets_list.append([self.uid, Target(self.uid, self.targets.pop(0))])
                 self.uid += 1
 
-
                 unclassified_targets = []
                 for i in range(len(self.targets_list)):
                     if self.targets_list[i][1].classification == "None":
@@ -274,15 +284,18 @@ def main():
 
     # Process cabling
     plan_request = Pipe(env, 0)
-    plan_feedback = Pipe (env, 0)
+    plan_feedback = Pipe(env, 0)
     nav_req = Pipe(env, 0)
     nav_update = Pipe(env, 0)
+    fig, ax = plt.subplots()
+    ax = fig.add_subplot(111, projection='3d')
+
     # env.process(__target_generator(env, plan_request, plan_feedback))
-    tg = Target_generator(env, plan_request, plan_feedback, nav_req, nav_update)
-    auv1 = Auv(env, "auv1", plan_request, plan_feedback, nav_req, nav_update)
+    tg = TargetGenerator(env, plan_request, plan_feedback, nav_req, nav_update)
+    auv1 = AuvExecutor(env, "auv1", plan_request, plan_feedback, nav_req, nav_update)
 
     if PLOT:
-        env.process(position_printer(env, auv1, plt))
+        env.process(position_printer(env, auv1, ax))
     env.run(until=3600)
     print(time.time()-start)
     if PLOT:
