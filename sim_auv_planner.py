@@ -1,8 +1,5 @@
 __author__ = 'nick'
 
-DEBUG = True
-PLOT = True
-
 import simpy
 import numpy as np
 import time
@@ -14,6 +11,8 @@ from target import Target
 from pipe import Pipe
 from sim_auv import AuvExecutor, get_euclidean3d, position_printer
 
+DEBUG = True
+PLOT = True
 # DEBUG = os.environ.get('DEBUG', None) == "True"
 # PLOT = os.environ.get('PLOT', None) == "True"
 

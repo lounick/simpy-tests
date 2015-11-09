@@ -88,10 +88,10 @@ class AuvExecutor:
                         self.curr_target = self.target_list[self.target_order[0]]
                         has_targets = True
                         if self.curr_target.classification != "None":
-                            print("Target already classified, skipping")
+                            if DEBUG:
+                                print("Target already classified, skipping")
                             self.target_order.pop(0)
                             has_targets = False
-
                 if has_targets:
                     if DEBUG:
                         print("Next target is at: ", self.curr_target.ned_pos)
@@ -290,7 +290,6 @@ def main():
     fig, ax = plt.subplots()
     ax = fig.add_subplot(111, projection='3d')
 
-    # env.process(__target_generator(env, plan_request, plan_feedback))
     tg = TargetGenerator(env, plan_request, plan_feedback, nav_req, nav_update)
     auv1 = AuvExecutor(env, "auv1", plan_request, plan_feedback, nav_req, nav_update)
 
